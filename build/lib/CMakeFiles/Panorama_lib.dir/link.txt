@@ -1,0 +1,2 @@
+/usr/bin/ar cr libPanorama_lib.a  CMakeFiles/Panorama_lib.dir/ImageStitcher.cpp.o
+/usr/bin/ranlib libPanorama_lib.a
