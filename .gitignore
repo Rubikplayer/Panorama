@@ -1,0 +1,10 @@
+
+*.cmake
+
+build/CMakeCache.txt
+
+*.cmake
+
+build/CMakeCache.txt
+
+build/lib/libPanorama_lib.a

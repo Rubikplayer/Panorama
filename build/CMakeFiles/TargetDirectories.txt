@@ -1,2 +1,0 @@
-/Users/tianyeli/Workspace/cpp/Panorama/build/lib/CMakeFiles/Panorama_lib.dir
-/Users/tianyeli/Workspace/cpp/Panorama/build/lib/CMakeFiles/panorama.dir
