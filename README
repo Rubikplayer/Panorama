@@ -1,11 +1,9 @@
-README 
-
 Panorama
-by Tianye Li <tianye DOT focus AT gmail>
+by Rubikplayer <rubikplayer AT gmail>
 
 Automatic panorama stitching using SURF feature
 
-Developed in C++ with OpenCV 2.8.4
-Built with CMake
+Language: C++ with OpenCV 2.8.4
+Build: CMake + GNU Make
 OS: Mac OSX 10.9.5
 
