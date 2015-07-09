@@ -4,6 +4,7 @@
 #include <vector>
 #include <opencv2/opencv.hpp>
 #include "ImageStitcher.h"
+#include "RansacMatcher.h"
 
 int safemain( int argc, char *argv[] )
 {
@@ -53,26 +54,32 @@ int safemain( int argc, char *argv[] )
 	int frameNum = frameEnd - frameStart + 1;
 
 	// step 1: read data, resize
-
 	std::vector<cv::Mat> images;
 	stitcher.readImages( images );
-
 	stitcher.resizeImages( images );
 	
-
 	// step 2: warp images
-	// stitcher.projectImagesToCylinder( images );
-
-	// cv::Mat xmap, ymap;
-	// stitcher.getCylinderMaps( xmap, ymap, images[0].size(), distance );
-
-	stitcher.projectImagesToCylinder( images );
+	cv::Mat mask;
+	stitcher.projectImagesToCylinder( images, mask );
 
 	// step 3: feature detection, matching, homography estimation
+	std::vector<cv::Mat> homographies;
+	stitcher.estimateHomographies( images, homographies );
 
-	// step 4: merge images
+	// step 4: stitch images
+	cv::Size canvas_size( -1, -1 );
+	cv::Mat result;
+	stitcher.stitchImages( images, mask, homographies, result );
 
 	// step 5: write the results
+	cv::namedWindow( "Panorama", cv::WINDOW_AUTOSIZE );
+	cv::imshow( "Panorama", result );
+	cv::waitKey( 0 );
+
+	cv::imwrite( "/tmp/result.png", result );
+	// std::cout << "writing result image: " << std::string( src ) + std::string( "/out/result.jpg" ) << std::endl;
+ //    imwrite( string(src) + string( "/out/result.jpg" ), result );
+
 
 	return 0;
 }
