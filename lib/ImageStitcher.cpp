@@ -54,6 +54,36 @@ ImageStitcher::~ImageStitcher()
 // ----------------------------------------------------- //
 
 
+cv::Mat 
+ImageStitcher::process()
+{
+	// step 1: read data, resize
+	std::vector<cv::Mat> images;
+	readImages( images );
+	resizeImages( images );
+	
+	// step 2: warp images
+	cv::Mat mask;
+	projectImagesToCylinder( images, mask );
+
+	// step 3: feature detection, matching, homography estimation
+	std::vector<cv::Mat> homographies;
+	estimateHomographies( images, homographies );
+
+	// step 4: stitch images
+	cv::Mat result;
+	stitchImages( images, mask, homographies, result );
+
+	std::cout << "stitching complete!" << std::endl;
+
+	return result;
+
+}
+
+
+// ----------------------------------------------------- //
+
+
 bool
 ImageStitcher::readOneImage( cv::Mat &img, int frame )
 {
@@ -107,19 +137,24 @@ ImageStitcher::readImages( std::vector<cv::Mat> &images )
 bool 
 ImageStitcher::resizeImages( std::vector<cv::Mat> &images )
 {
-	for ( int i = 0; i < frame_num; ++i )
-	{
-		// std::cout << "frame " << i;
-		// std::cout << " " << images[i].cols << "-" << images[i].rows;
+	std::cout << "resize from r:" << images[0].rows << " - c:" << images[0].cols;
 
-		cv::resize( images[i], images[i],
+	
+
+	for ( int i = 0; i < images.size(); ++i )
+	{
+		cv::Mat tmp;
+		cv::resize( images[i], tmp,
 		 			cv::Size( images[i].cols / resize_scale, images[i].rows / resize_scale ) );
 		
-		// std::cout << " to " << images[i].cols << "-" << images[i].rows << std::endl;
-		// cv::namedWindow( "input", cv::WINDOW_AUTOSIZE );
-		// cv::imshow( "input", images[i] );
-		// cv::waitKey( 20 );
+		tmp.copyTo( images[i] );
+        cv::namedWindow( "resized", cv::WINDOW_AUTOSIZE );
+		cv::imshow( "resized", images[i] );
+		cv::waitKey( 0 );
 	}
+
+	std::cout << " to r:" << images[0].rows << " - c:" << images[0].cols << std::endl;
+	// cv::destroyWindow( "resized" );
 
 	return true;
 }
@@ -138,22 +173,26 @@ ImageStitcher::projectImagesToCylinder( std::vector<cv::Mat> &images, cv::Mat &m
     cv::Mat orig_mask;
     float sigma = static_cast<float>( images[0].cols / 2 );
     getGaussianMask( orig_mask, images[0].size(), 50 );
-    cv::remap( orig_mask, mask, xmap, ymap, cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0,0,0) );
+    cv::remap( orig_mask, mask, xmap, ymap, cv::INTER_LINEAR ); //, cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0,0,0) );
 
     for ( int i = 0; i < images.size(); ++i )
     {
         // std::cout << i << " r" << images[i].rows << "-c" << images[i].cols << std::endl;
-        cv::remap( images[i], images[i], xmap, ymap,
-              	   cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0,0,0) );
+    	// if ( i == 0 )
+    	// 	cv::imwrite( "/tmp/I0_before.png", images[0] );
 
+        cv::remap( images[i], images[i], xmap, ymap,
+              	   INTER_CUBIC ); //, BORDER_CONSTANT, cv::Scalar(0,0,0) );
+		// if ( i == 0 )
+		// {
+		// 	cv::imwrite( "/tmp/I0_after.png", images[0] );
+		// 	std::cout << "debug images saved at /tmp" << std::endl;
+		// }
         // std::cout << i << " r" << images[i].rows << "-c" << images[i].cols << std::endl;
 
-        // cv::namedWindow( "image", cv::WINDOW_AUTOSIZE );
-        // cv::imshow( "image", images[i] ); 
-        // cv::waitKey( 0 );
-
-        // printMat( xmap, std::string( "/tmp/xmap.txt" ) );
-        // printMat( ymap, std::string( "/tmp/ymap.txt" ) );
+        cv::namedWindow( "image", cv::WINDOW_AUTOSIZE );
+        cv::imshow( "image", images[i] ); 
+        cv::waitKey( 0 );
 
     }
     return true;
@@ -166,36 +205,34 @@ ImageStitcher::projectImagesToCylinder( std::vector<cv::Mat> &images, cv::Mat &m
 bool
 ImageStitcher::getCylinderMaps( cv::Mat &xmap, cv::Mat &ymap, cv::Size src_size, float f )
 {
-	float cx = static_cast<float>( src_size.width ) / 2;
-    float cy = static_cast<float>( src_size.height) / 2;
-    float s  = f; // scaling factor, usually set equal to f (Szeliski (2010) P439)
+	float W = static_cast<float>( src_size.width );
+    float H = static_cast<float>( src_size.height );
+    float d = f; // scaling factor, usually set equal to f (Szeliski (2010) P439)
+    float s_h = 1; // set the cylinder at focal length location ( factor == 1 )
+    float s_theta = d;
     
+    float theta_max = atan( W / f / 2 );
+    float h_max = d * H / f / 2;
+
+    float W_new = ceil( 2 * static_cast<float>( s_theta ) * theta_max );
+    float H_new = ceil( 2 * static_cast<float>( s_h ) * h_max );
     
-    float miniXToCenterSq = (static_cast<float>(static_cast<int>(cx)) - cx )
-    						* (static_cast<float>(static_cast<int>(cx)) - cx );
-    float xmin = s * atan( (-cx) / f ) + cx;
-    float xmax = s * atan( ( cx) / f ) + cx;
-    float ymin = s * (-cy) / sqrt( f * f + miniXToCenterSq ) + cy;
-    float ymax = s * ( cy) / sqrt( f * f + miniXToCenterSq ) + cy;
-   
-    
-    int new_rows = static_cast<int>(ymax) - static_cast<int>(ymin);
-    int new_cols = static_cast<int>(xmax+0.5) - static_cast<int>(xmin+0.5);
-    //    int x_offset = static_cast<int>(xmin/2);
-    
+    int new_rows = static_cast<int>(H_new);
+    int new_cols = static_cast<int>(W_new);
+
     xmap.create( new_rows, new_cols, CV_32FC1 );
     ymap.create( new_rows, new_cols, CV_32FC1 );
     
-    float cx2 = static_cast<float>(new_cols) / 2;
-    float cy2 = static_cast<float>(new_rows) / 2;
-    
-    for ( int r=0; r<new_rows; r++ )
+    for ( int r = 0; r < new_rows; r++ )
     {
-        for ( int c=0; c<new_cols; c++ )
+        for ( int c = 0; c < new_cols; c++ )
         {
             // coordinate in original image
-            xmap.at<float>(r,c) = f * tan( (c-cx2) / s ) + cx;
-            ymap.at<float>(r,c) = f * (r-cy2) / s / cos( (c-cx2)/s ) + cy;
+            float h_p = ( r - H_new / 2 ) / s_h; 
+            float theta_p = ( c - W_new / 2 ) / s_theta;       
+
+            xmap.at<float>(r,c) = f * tan( theta_p ) + W / 2;
+            ymap.at<float>(r,c) = f * h_p / d / cos( theta_p ) + H / 2;
 
         } // end for col
     } // end for row
@@ -208,6 +245,7 @@ ImageStitcher::getCylinderMaps( cv::Mat &xmap, cv::Mat &ymap, cv::Size src_size,
 
 // ----------------------------------------------------- //
 
+
 bool 
 ImageStitcher::estimateHomographies( std::vector<cv::Mat> &images, std::vector<cv::Mat> &homographies )
 {
@@ -218,8 +256,6 @@ ImageStitcher::estimateHomographies( std::vector<cv::Mat> &images, std::vector<c
     cv::Ptr<cv::FeatureDetector> pfd = new cv::SurfFeatureDetector( 10 );
     rmatcher.setFeatureDetector( pfd );
 
-    // std::vector<cv::Mat> homographies;
-
     for ( int i = 0; i < images.size()-1; i++ )
     {
         std::cout << std::endl << "matching image " << i << " and " << i+1 << std::endl;
@@ -227,38 +263,6 @@ ImageStitcher::estimateHomographies( std::vector<cv::Mat> &images, std::vector<c
         matchTwoImages( images[i], images[i+1], rmatcher, F, H );
         homographies.push_back( H );
     }
-
-    // for ( int i = 0; i < images.size(); i++ )
-    // {
-    //     std::cout << std::endl << "Preparing H[" << i << "]" << std::endl;
-    //     cv::Mat H = Mat::eye(3, 3, orig_homographies[0].type());
-    //     if ( i < center ) 
-    //     {
-    //         for ( int j = i; j < center; j++ ) 
-    //         {
-    //             H = orig_homographies[j] * H;
-    //             std::cout << "   multiplying H[" << j << "]" << std::endl;
-    //         }
-    //     } 
-    //     else if ( i > center ) 
-    //     {
-    //         for ( int j = i; j > center; j-- ) {
-    //             H = orig_homographies[j-1].inv() * H;
-    //             std::cout << "   multiplying inv H[" << j-1 << "]" << std::endl;
-    //         }
-    //     } 
-    //     else 
-    //     {
-    //         // do nothing: H = identity
-    //     }
-        
-    //     // // translate to center ( PUT IN MERGING PART )
-    //     // cv::Mat translate = cv::Mat::eye( 3, 3, homographies[0].type() );
-    //     // translate.at<double>( 0,2 ) = static_cast<double>( ( result_size.width - images[0].cols ) / 2 );
-    //     // translate.at<double>( 1,2 ) = static_cast<double>( ( result_size.height - images[0].rows ) / 2 );
-        
-    //     homographies.push_back( H ); // translate * H
-    // }
 
     // std::cout << "H[0]: " << homographies[0] << std::endl;
     // cv::Mat I0_warped;
@@ -341,25 +345,24 @@ ImageStitcher::stitchImages( std::vector<cv::Mat> &images, cv::Mat &mask, std::v
 
 	// process homographies based on pivot image
 	std::vector<cv::Mat> homographiesToCenter;
-
     int center = static_cast<int>(images.size()) / 2;
 	for ( int i = 0; i < images.size(); i++ )
     {
-        std::cout << std::endl << "Preparing H[" << i << "]" << std::endl;
+        // std::cout << std::endl << "Preparing H[" << i << "]" << std::endl;
         cv::Mat H = Mat::eye(3, 3, homographies[0].type());
         if ( i < center ) 
         {
             for ( int j = i; j < center; j++ ) 
             {
                 H = homographies[j] * H;
-                std::cout << "   multiplying H[" << j << "]" << std::endl;
+                // std::cout << "   multiplying H[" << j << "]" << std::endl;
             }
         } 
         else if ( i > center ) 
         {
             for ( int j = i; j > center; j-- ) {
                 H = homographies[j-1].inv() * H;
-                std::cout << "   multiplying inv H[" << j-1 << "]" << std::endl;
+                // std::cout << "   multiplying inv H[" << j-1 << "]" << std::endl;
             }
         } 
         else 
@@ -371,10 +374,10 @@ ImageStitcher::stitchImages( std::vector<cv::Mat> &images, cv::Mat &mask, std::v
     }
 
     // estimate canvas size
-    cv::Size result_size = estimateCanvasSize( homographiesToCenter, images[0].size(), 0 );
+    cv::Size result_size = estimateCanvasSize( homographiesToCenter, images[0].size(), 100 );
     std::cout << "result size (r,c): " << result_size.height << " - " << result_size.width << std::endl;
 
-    // translate to center ( PUT IN MERGING PART )
+    // translate to center (pivot image)
     cv::Mat translate = cv::Mat::eye( 3, 3, homographiesToCenter[0].type() );
     translate.at<double>( 0,2 ) = static_cast<double>( ( result_size.width - images[0].cols ) / 2 );
     translate.at<double>( 1,2 ) = static_cast<double>( ( result_size.height - images[0].rows ) / 2 );
@@ -388,7 +391,6 @@ ImageStitcher::stitchImages( std::vector<cv::Mat> &images, cv::Mat &mask, std::v
     std::vector<cv::Mat> images_warped;
 
     warpImages( images, mask, homographiesToCenter, result_size, images_warped, masks_warped );
-
     mergeImages( images_warped, masks_warped, result );
 
     return true;
@@ -414,8 +416,8 @@ ImageStitcher::estimateCanvasSize( std::vector<cv::Mat> &homographiesToCenter, c
     cv::Mat x2( edge2, cv::Rect( 0,0,4,1 ) );
     cv::Mat y2( edge2, cv::Rect( 0,1,4,1 ) );
 
-    // std::cout << "x: " << x1 << " & " << x2 << std::endl;
-    // std::cout << "y: " << y1 << " & " << y2 << std::endl << std::endl;
+    std::cout << "x: " << x1 << "\n & " << x2 << std::endl;
+    std::cout << "y: " << y1 << "\n & " << y2 << std::endl << std::endl;
 
     double min1, max1, min2, max2;
 
@@ -429,7 +431,7 @@ ImageStitcher::estimateCanvasSize( std::vector<cv::Mat> &homographiesToCenter, c
     double y_min = cv::min( min1, min2 );
     double y_max = cv::max( max1, max2 );
 
-    // std::cout << "[xmin, xmax, ymin, ymax]: " << x_min << " " << x_max << " " << y_min << " " << y_max << std::endl;
+    std::cout << "[xmin, xmax, ymin, ymax]: " << x_min << " " << x_max << " " << y_min << " " << y_max << std::endl;
 
     cv::Size result_size;
     result_size.height = static_cast<int>( y_max - y_min + 2 * extra );
@@ -442,6 +444,8 @@ ImageStitcher::estimateCanvasSize( std::vector<cv::Mat> &homographiesToCenter, c
 
 
 // ----------------------------------------------------- //
+
+
 bool 
 ImageStitcher::warpImages( const std::vector<cv::Mat> &images, const cv::Mat &mask,
 						 const std::vector<cv::Mat> &homographiesToCenter, cv::Size result_size,
@@ -452,9 +456,9 @@ ImageStitcher::warpImages( const std::vector<cv::Mat> &images, const cv::Mat &ma
         cv::Mat cur_image, cur_mask;
 
         cv::warpPerspective( images[i], cur_image, homographiesToCenter[i], result_size,
-                      		 cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0,0,0) );
-        cv::warpPerspective( mask, cur_mask, homographiesToCenter[i], result_size,
-                         	 cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0,0,0) );
+                      		 INTER_CUBIC, BORDER_CONSTANT, cv::Scalar(0,0,0) );
+        cv::warpPerspective( mask, cur_mask, homographiesToCenter[i], result_size, 
+                         	 INTER_CUBIC, BORDER_CONSTANT, cv::Scalar(0,0,0) );
 
         images_warped.push_back( cur_image );
         masks_warped.push_back(cur_mask);
@@ -470,6 +474,10 @@ ImageStitcher::warpImages( const std::vector<cv::Mat> &images, const cv::Mat &ma
     }
 	return true;
 }
+
+
+// ----------------------------------------------------- //
+
 
 bool
 ImageStitcher::mergeImages( const std::vector<cv::Mat> &images_warped, 
@@ -586,6 +594,7 @@ ImageStitcher::display()
 
 
 // ----------------------------------------------------- //
+
 
 void 
 ImageStitcher::printMat( cv::Mat &image, std::string filename )

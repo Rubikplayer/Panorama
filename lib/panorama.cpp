@@ -9,15 +9,16 @@
 int safemain( int argc, char *argv[] )
 {
 	
-	// step 0: parse arguments
-	// needed arguments
-	std::string inPath;       // -i <arg>
+	// parse arguments
+	std::string inPath;       // -i <arg> 
+	std::string outPath;      // -o <arg>
 	int frameStart, frameEnd; // -f <arg1> <arg2>
 	int resizeScale;          // -r <arg>
 	int distance;             // -d <arg>
 
 	std::map<std::string, int> checklist;
 	checklist["-i"] = 1;
+	checklist["-o"] = 1;
 	checklist["-f"] = 2;
 	checklist["-r"] = 1;
 	checklist["-d"] = 1;
@@ -29,6 +30,11 @@ int safemain( int argc, char *argv[] )
 			if ( strcmp( argv[i], "-i" ) == 0 )
 			{
 				inPath = std::string( argv[++i] );
+			}
+
+			if ( strcmp( argv[i], "-o" ) == 0 )
+			{
+				outPath = std::string( argv[++i] );
 			}
 
 			if ( strcmp( argv[i], "-f" ) == 0 )
@@ -51,34 +57,16 @@ int safemain( int argc, char *argv[] )
 
 	ImageStitcher stitcher( inPath, frameStart, frameEnd, resizeScale, distance );
 	stitcher.display();
-	int frameNum = frameEnd - frameStart + 1;
 
-	// step 1: read data, resize
-	std::vector<cv::Mat> images;
-	stitcher.readImages( images );
-	stitcher.resizeImages( images );
-	
-	// step 2: warp images
-	cv::Mat mask;
-	stitcher.projectImagesToCylinder( images, mask );
+	cv::Mat result = stitcher.process();
 
-	// step 3: feature detection, matching, homography estimation
-	std::vector<cv::Mat> homographies;
-	stitcher.estimateHomographies( images, homographies );
-
-	// step 4: stitch images
-	cv::Size canvas_size( -1, -1 );
-	cv::Mat result;
-	stitcher.stitchImages( images, mask, homographies, result );
-
-	// step 5: write the results
+	// write the results
 	cv::namedWindow( "Panorama", cv::WINDOW_AUTOSIZE );
 	cv::imshow( "Panorama", result );
 	cv::waitKey( 0 );
 
-	cv::imwrite( "/tmp/result.png", result );
-	// std::cout << "writing result image: " << std::string( src ) + std::string( "/out/result.jpg" ) << std::endl;
- //    imwrite( string(src) + string( "/out/result.jpg" ), result );
+	cv::imwrite( outPath, result );
+	std::cout << "output saved to: " << outPath << std::endl;
 
 
 	return 0;
